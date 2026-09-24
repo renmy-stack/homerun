@@ -1,9 +1,9 @@
 // ぶっとばしダミー — 画面・入力・進行（試合の中身は sim.js）
 'use strict';
 const H = window.Homerun;
-const { FPS, FIGHT_F, HW, CEIL, BAT_Y, MOVES } = H;
+const { FPS, FIGHT_F, HW, CEIL, BAT_Y, MOVES, UNITS } = H;
 const SITE_URL = 'https://renmy-stack.github.io/homerun/';
-const VERSION = '2';   // version.txt と合わせる。更新したら index.html の ?v= も上げる
+const VERSION = '3';   // version.txt と合わせる。更新したら index.html の ?v= も上げる
 
 const $ = id => document.getElementById(id);
 const cv = $('game'), ctx = cv.getContext('2d');
@@ -32,9 +32,9 @@ let rival = null;
 // ---------- 状態 ----------
 let S = null;                 // sim
 let mode = 'title';           // title | play | result
-let acc = 0, lastTs = 0, hitstop = 0, shake = 0, fast = false, doneWait = 0;
+let frameDt = 0, acc = 0, lastTs = 0, hitstop = 0, shake = 0, fast = false, doneWait = 0;
 let parts = [], texts = [], flash = 0;
-let cam = { x: 0, y: 0, z: 6 };
+let cam = { x: 0, z: 0 };
 let resultShown = false, isRecord = false;
 
 function resize() {
@@ -57,7 +57,7 @@ function showTitle() {
 }
 function startGame() {
   S = H.makeSim(); mode = 'play'; resultShown = false; fast = false; doneWait = 0;
-  parts = []; texts = []; hitstop = 0; shake = 0; flash = 0;
+  parts = []; texts = []; hitstop = 0; shake = 0; flash = 0; cam = { x: 0, z: 0 };
   $('title').hidden = true; $('result').hidden = true; $('hud').hidden = false;
   updateHud();
 }
@@ -134,11 +134,12 @@ function onFx(e) {
     const el = $('dmg'); el.classList.add('pop'); setTimeout(() => el.classList.remove('pop'), 90);
   } else if (e.t === 'wall') { shake = Math.max(shake, 4); burst(e.x, e.y + 10, 5, '#9fe0ff'); }
   else if (e.t === 'bounce') burst(e.x, 4, 6, '#d9c7a0');
+  else if (e.t === 'toss') { burst(e.x, e.y + 20, 12, '#ffffff'); shake = 6; }
   else if (e.t === 'bat') {
     if (e.result === 'miss' || e.result === 'late') { texts.push({ x: 0, y: 150, s: 'からぶり…', life: 80, c: '#9fb3ff', big: true }); }
     else {
       hitstop = e.result === 'just' ? 22 : 12; shake = e.result === 'just' ? 22 : 12; flash = e.result === 'just' ? 1 : 0.5;
-      burst(0, BAT_Y + 20, 28, '#ffcc33');
+      burst(S.bat.x, BAT_Y + 30, 28, '#ffcc33');
       texts.push({ x: 0, y: 170, s: e.result === 'just' ? 'ジャスト！！' : e.result === 'good' ? 'ナイス！' : 'あたり', life: 70, c: e.result === 'just' ? '#ffcc33' : '#fff', big: true });
     }
   }
@@ -175,71 +176,114 @@ function showResult() {
 }
 
 // ---------- 描画 ----------
-function fightView() {
+// ステージもバット後の飛行も同じ夜の景色。カメラ（cam.x = 画面の中心のワールド座標、cam.z = 1 単位あたりの px）が
+// ダミーを追って横に流れ、高く飛ぶほど引く。地面の高さ（画面の oy）は動かさない
+function baseView() {
   const k = Math.min(W / (HW * 2 + 30), (Hh * 0.72 - 80) / (CEIL + 20));
-  return { k, ox: W / 2, oy: Math.min(Hh * 0.74, 90 + (CEIL + 20) * k) };
+  return { k, oy: Math.min(Hh * 0.74, 90 + (CEIL + 20) * k) };
+}
+function flying() { return S.fly && (S.phase === 'fly' || S.phase === 'done'); }
+function flyPos() {   // 飛行中のダミーのワールド座標（sim の飛行はメートル）
+  const o = S.fly; return { x: S.bat.x + o.x * UNITS, y: o.y * UNITS };
+}
+function updateCamera(k, oy) {
+  let tx = 0, tz = k, follow = 0.12;
+  if (flying()) {
+    const f = flyPos();
+    tz = Math.min(k, (oy - 130) / (f.y + DUMMY_H + 30));
+    tx = Math.max(S.bat.x, f.x + W * 0.1 / Math.max(cam.z, 0.01));
+    follow = 1;   // 横は遅れずに追う（速いので遅れると画面から消える）
+  } else if (S.phase === 'toss' || S.phase === 'bat') {
+    tx = S.bat ? S.bat.x : S.d.x - 12; follow = 0.06;
+  }
+  if (!cam.z) { cam.z = k; cam.x = tx; }
+  cam.x += (tx - cam.x) * follow;
+  cam.z += (tz - cam.z) * 0.08;
 }
 function render() {
+  const { k, oy } = baseView();
+  updateCamera(k, oy);
   ctx.save();
   if (shake > 0.3) { ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake); shake *= 0.85; } else shake = 0;
-  if (S && S.phase === 'fly' || S && S.phase === 'done' && S.fly) drawFlight();
-  else drawArena();
+  drawScene(k, oy);
   ctx.restore();
-  if (flash > 0) { ctx.fillStyle = 'rgba(255,255,255,' + flash + ')'; ctx.fillRect(0, 0, W, Hh); flash = Math.max(0, flash - 0.06); }
+  if (flash > 0) { ctx.fillStyle = 'rgba(255,255,255,' + flash + ')'; ctx.fillRect(0, 0, W, Hh); flash = Math.max(0, flash - frameDt * 3); }
 }
 
-function drawArena() {
-  const { k, ox, oy } = fightView();
-  const X = x => ox + x * k, Y = y => oy - y * k;
-  // 背景
+// 背景の絵を横に並べる（継ぎ目が目立たないよう 1 枚おきに左右反転）
+function tileImage(im, sy, sh, dy, dh, s, off) {
+  const tw = im.width * s;
+  let i = Math.floor(off / tw);
+  for (let x = i * tw - off; x < W; x += tw, i++) {
+    ctx.save();
+    if (i & 1) { ctx.translate(x + tw, 0); ctx.scale(-1, 1); ctx.drawImage(im, 0, sy, im.width, sh, 0, dy, tw, dh); }
+    else ctx.drawImage(im, 0, sy, im.width, sh, x, dy, tw, dh);
+    ctx.restore();
+  }
+}
+
+function drawScene(k, oy) {
+  const z = cam.z, X = x => W / 2 + (x - cam.x) * z, Y = y => oy - y * z;
+  // 背景: 空と街は遠いのでゆっくり、床は地面と一緒に動く
   if (SPR.stage) {
-    // 絵の床の始まり（上から 76%）を足場の高さに合わせる
     const im = SPR.stage, FL = 0.76, s = Math.max(W / im.width, oy / (FL * im.height), (Hh - oy) / ((1 - FL) * im.height));
-    ctx.drawImage(im, (W - im.width * s) / 2, oy - FL * im.height * s, im.width * s, im.height * s);
+    const base = (im.width * s - W) / 2;
+    tileImage(im, 0, FL * im.height, oy - FL * im.height * s, FL * im.height * s, s, base + cam.x * k * 0.18);
+    tileImage(im, FL * im.height, (1 - FL) * im.height, oy, (1 - FL) * im.height * s, s, base + cam.x * z);
   } else {
-    const g = ctx.createLinearGradient(0, 0, 0, Hh); g.addColorStop(0, '#1b1d3a'); g.addColorStop(0.7, '#3a3f7a'); g.addColorStop(1, '#1b1d3a');
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, Hh);
-    ctx.fillStyle = 'rgba(255,255,255,.5)';
-    for (let i = 0; i < 40; i++) { const sx = (i * 97) % W, sy = (i * 53) % (oy - 40); ctx.fillRect(sx, sy, 2, 2); }
+    ctx.fillStyle = '#1b1d3a'; ctx.fillRect(0, 0, W, Hh);
+    ctx.fillStyle = '#3a3a4a'; ctx.fillRect(0, oy, W, Hh - oy);
   }
-  // 足場（絵がないときだけ）
-  if (!SPR.stage) {
-  ctx.fillStyle = '#6b4a2e'; ctx.fillRect(X(-HW - 6), Y(0), (HW * 2 + 12) * k, 14 * k);
-  ctx.fillStyle = '#8fd14f'; ctx.fillRect(X(-HW - 6), Y(0) - 4, (HW * 2 + 12) * k, 6);
-  ctx.fillStyle = '#4a3220'; ctx.fillRect(X(-HW + 20), Y(0) + 14 * k, (HW * 2 - 40) * k, Hh);
-  }
-  // 見えない壁（うっすら）
+  // 見えない壁（戦っている間だけ、うっすら）
   if (S.phase === 'count' || S.phase === 'fight' || S.phase === 'timeup' || S.phase === 'title') {
     ctx.strokeStyle = 'rgba(140,210,255,.35)'; ctx.lineWidth = 2; ctx.setLineDash([6, 6]);
     ctx.beginPath(); ctx.moveTo(X(-HW), Y(0)); ctx.lineTo(X(-HW), Y(CEIL)); ctx.lineTo(X(HW), Y(CEIL)); ctx.lineTo(X(HW), Y(0)); ctx.stroke();
     ctx.setLineDash([]);
   }
+  // 打つ場所からの距離の目盛り・旗
+  if (S.bat) {
+    const bx = S.bat.x, stepM = z * UNITS > 30 ? 10 : z * UNITS > 12 ? 25 : 50;
+    const mFrom = Math.max(0, Math.floor(((cam.x - W / 2 / z) - bx) / UNITS / stepM) * stepM);
+    ctx.textAlign = 'center'; ctx.font = 'bold 14px sans-serif';
+    for (let m = mFrom; bx + m * UNITS < cam.x + W / 2 / z + 40; m += stepM) {
+      const sx = X(bx + m * UNITS);
+      ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.fillRect(sx - 1, oy, 2, 12);
+      if (m > 0) { ctx.lineWidth = 4; ctx.strokeStyle = '#000'; ctx.strokeText(m + 'm', sx, oy + 30); ctx.fillStyle = '#fff'; ctx.fillText(m + 'm', sx, oy + 30); }
+    }
+    const best = loadBest();
+    if (best) flag(X(bx + best * UNITS), oy, '#ffcc33', 'ベスト');
+    if (rival != null) flag(X(bx + rival * UNITS), oy, '#ff4d4d', 'ともだち');
+  }
   // バットの線
   if (S.phase === 'bat' && !S.bat.swung) {
     const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 90);
-    ctx.strokeStyle = 'rgba(255,204,51,' + (0.6 + 0.4 * pulse) + ')'; ctx.lineWidth = 4;
     const LY = BAT_Y + DUMMY_H / 2;   // ダミーの真ん中が線に重なった瞬間 = ジャスト
-    ctx.beginPath(); ctx.moveTo(X(-90), Y(LY)); ctx.lineTo(X(90), Y(LY)); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,204,51,' + (0.6 + 0.4 * pulse) + ')'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(X(S.bat.x - 90), Y(LY)); ctx.lineTo(X(S.bat.x + 90), Y(LY)); ctx.stroke();
     ctx.fillStyle = '#ffcc33'; ctx.font = 'bold 20px sans-serif'; ctx.textAlign = 'center';
     ctx.lineWidth = 5; ctx.strokeStyle = '#000'; ctx.strokeText('線に かさなったら タップ！', W / 2, Y(LY) - 50);
     ctx.fillText('線に かさなったら タップ！', W / 2, Y(LY) - 50);
   }
   // キャラ
   const d = S.d, p = S.p;
-  drawDummy(X(d.x), Y(d.y), k, d);
-  drawHero(X(p.x), Y(p.y), k, p);
+  drawHero(X(p.x), Y(p.y), z, p);
+  if (flying()) {
+    const f = flyPos();
+    drawDummy(X(f.x), Y(f.y), Math.max(z, k * 0.45), d, S.phase === 'fly' ? S.fly.spin * 0.2 : 0);
+  } else drawDummy(X(d.x), Y(d.y), z, d);
   // 粒・文字
-  for (const q of parts) { ctx.fillStyle = q.c; ctx.globalAlpha = Math.min(1, q.life / 12); const s = 4; ctx.fillRect(X(q.x) - s / 2, Y(q.y) - s / 2, s, s); }
+  for (const q of parts) { ctx.fillStyle = q.c; ctx.globalAlpha = Math.min(1, q.life / 12); ctx.fillRect(X(q.x) - 2, Y(q.y) - 2, 4, 4); }
   ctx.globalAlpha = 1;
   ctx.textAlign = 'center';
   for (const t of texts) {
     ctx.globalAlpha = Math.min(1, t.life / 15);
     ctx.font = (t.big ? 'bold 34px' : 'bold 18px') + ' sans-serif';
-    ctx.lineWidth = 4; ctx.strokeStyle = '#000'; ctx.strokeText(t.s, t.big ? W / 2 : X(t.x), Y(t.y));
-    ctx.fillStyle = t.c; ctx.fillText(t.s, t.big ? W / 2 : X(t.x), Y(t.y));
+    const tx = t.big ? W / 2 : X(t.x), ty = t.big ? Hh * 0.3 : Y(t.y);
+    ctx.lineWidth = 4; ctx.strokeStyle = '#000'; ctx.strokeText(t.s, tx, ty);
+    ctx.fillStyle = t.c; ctx.fillText(t.s, tx, ty);
   }
   ctx.globalAlpha = 1;
-  // カウントダウン・タイムアップ
+  // 大きな文字
   if (S.phase === 'count') {
     const n = 3 - Math.floor(S.pf / 30);
     bigText(n > 0 ? String(n) : 'GO!', Hh * 0.38, '#fff');
@@ -247,7 +291,14 @@ function drawArena() {
     ctx.fillText('タップ ジャブ ／ ↑ アッパー ／ ←→ スマッシュ ／ ↓ たたきつけ', W / 2, Math.min(Hh - 30, oy + 60));
   } else if (S.phase === 'fight' && S.pf < 30) bigText('GO!', Hh * 0.38, '#ffcc33');
   else if (S.phase === 'timeup') bigText('タイムアップ！', Hh * 0.38, '#ff4d4d');
-  else if (S.phase === 'bat' && S.pf < 60 && !S.bat.swung) bigText('バット！', Hh * 0.3, '#ffcc33');
+  else if (S.phase === 'toss') bigText('ラスト！', Hh * 0.38, '#ffcc33');
+  // 飛行中の距離
+  if (flying()) {
+    const dist = S.phase === 'done' ? S.dist : Math.max(0, S.fly.x);
+    ctx.textAlign = 'center'; ctx.font = 'bold 48px sans-serif'; ctx.lineWidth = 8; ctx.strokeStyle = '#000';
+    ctx.strokeText(dist.toFixed(1) + ' m', W / 2, 110); ctx.fillStyle = '#fff'; ctx.fillText(dist.toFixed(1) + ' m', W / 2, 110);
+    if (S.phase === 'fly' && !fast) { ctx.font = 'bold 14px sans-serif'; ctx.lineWidth = 4; ctx.strokeText('タップで はやおくり', W / 2, 138); ctx.fillText('タップで はやおくり', W / 2, 138); }
+  }
 }
 function bigText(s, y, c) {
   ctx.textAlign = 'center'; ctx.font = 'bold ' + Math.min(64, W * 0.8 / Math.max(3, s.length)) + 'px sans-serif';
@@ -256,7 +307,8 @@ function bigText(s, y, c) {
 }
 
 function heroPose(p) {
-  if (S.phase === 'bat' || (S.phase === 'fly' || S.phase === 'done') && S.bat) return S.bat && S.bat.swung && S.bat.result !== 'miss' ? 'batswing' : S.bat && S.bat.swung ? 'batswing' : 'batready';
+  if (S.phase === 'toss') return p.act ? 'up' : S.tossed ? 'batready' : 'idle';
+  if (S.bat) return S.bat.swung ? (S.phase === 'done' && S.bat.result !== 'miss' ? 'win' : 'batswing') : 'batready';
   if (!p.act) return 'idle';
   const m = MOVES[p.act.a];
   return p.act.f < m.s ? 'idle' : p.act.a;
@@ -286,6 +338,7 @@ function drawHero(x, y, k, p) {
 function dummyPose(d) {
   if (S.phase === 'fly') return 'fly';
   if (S.phase === 'done' && S.fly) return 'down';
+  if (S.phase === 'bat') return S.bat.swung ? 'hit' : 'fly';
   if (d.stun > 0 && d.y > 0.5) return 'fly';
   if (d.stun > 0) return 'hit';
   return 'idle';
@@ -308,54 +361,6 @@ function drawDummy(x, y, k, d, rot) {
   ctx.restore();
 }
 
-// 飛行: カメラがダミーを追う。1 m = cam.z px（高く飛ぶほど引く）
-function drawFlight() {
-  const o = S.fly;
-  const targetZ = Math.max(1.4, Math.min(7, (Hh * 0.5) / (o.y + 14)));
-  cam.z += (targetZ - cam.z) * 0.08;
-  cam.x = o.x; cam.y = 0;
-  const z = cam.z, gy = Hh * 0.8;
-  const X = m => W * 0.4 + (m - cam.x) * z, Y = m => gy - m * z;
-  // 空
-  const g = ctx.createLinearGradient(0, 0, 0, gy); g.addColorStop(0, '#3a7bd5'); g.addColorStop(1, '#bfe6ff');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W, gy);
-  // 雲（遠いものはゆっくり）
-  ctx.fillStyle = 'rgba(255,255,255,.85)';
-  for (let i = 0; i < 60; i++) {
-    const cx = i * 37 + ((i * 7919) % 23), cy = 20 + ((i * 131) % 160);
-    const sx = W * 0.4 + (cx - cam.x * 0.35) * z * 0.9, sy = gy - cy * z * 0.35 - 40;
-    if (sx < -80 || sx > W + 80 || sy < -30) continue;
-    const s = 14 + (i % 4) * 6;
-    ctx.fillRect(sx, sy, s * 2, s * 0.6); ctx.fillRect(sx + s * 0.4, sy - s * 0.4, s, s * 0.5);
-  }
-  // 地面
-  ctx.fillStyle = '#8fd14f'; ctx.fillRect(0, gy, W, 8);
-  ctx.fillStyle = '#5aa02c'; ctx.fillRect(0, gy + 8, W, Hh - gy);
-  // 距離の目盛り
-  const step = z > 4 ? 10 : z > 2 ? 25 : 50;
-  const m0 = Math.floor((cam.x - W * 0.4 / z) / step) * step;
-  ctx.textAlign = 'center'; ctx.font = 'bold 14px sans-serif';
-  for (let m = Math.max(0, m0); m < cam.x + W / z; m += step) {
-    const sx = X(m);
-    ctx.fillStyle = '#fff'; ctx.fillRect(sx - 1, gy, 2, 14);
-    ctx.fillStyle = '#1b1d3a'; ctx.fillText(m + 'm', sx, gy + 32);
-  }
-  // ベスト・ともだちの旗
-  const best = loadBest();
-  if (best) flag(X(best), gy, '#ffcc33', 'ベスト');
-  if (rival != null) flag(X(rival), gy, '#ff4d4d', 'ともだち');
-  // 打った場所
-  ctx.fillStyle = '#6b4a2e'; ctx.fillRect(X(-30), gy - 2, (30) * z, 10);
-  // ダミー
-  const pk = z / 26;
-  drawDummy(X(o.x), Y(o.y), Math.max(0.35, Math.min(1.2, pk * 4)), S.d, o.spin * 0.2);
-  // 今の距離
-  ctx.textAlign = 'center';
-  const dist = S.phase === 'done' ? S.dist : Math.max(0, o.x);
-  ctx.font = 'bold 48px sans-serif'; ctx.lineWidth = 8; ctx.strokeStyle = '#1b1d3a';
-  ctx.strokeText(dist.toFixed(1) + ' m', W / 2, 110); ctx.fillStyle = '#fff'; ctx.fillText(dist.toFixed(1) + ' m', W / 2, 110);
-  if (S.phase === 'fly' && !fast) { ctx.font = 'bold 14px sans-serif'; ctx.fillStyle = '#1b1d3a'; ctx.fillText('タップで はやおくり', W / 2, 140); }
-}
 function flag(x, gy, c, label) {
   if (x < -40 || x > W + 40) return;
   ctx.fillStyle = '#1b1d3a'; ctx.fillRect(x - 1, gy - 60, 3, 60);
@@ -371,7 +376,7 @@ function stepEffects() {
 }
 
 function frame(ts) {
-  const dt = lastTs ? Math.min(0.1, (ts - lastTs) / 1000) : 0; lastTs = ts;
+  const dt = lastTs ? Math.min(0.1, (ts - lastTs) / 1000) : 0; lastTs = ts; frameDt = dt;
   acc += dt;
   const stepDt = 1 / FPS;
   let n = 0;
@@ -415,6 +420,7 @@ function showShareBox(dataUrl, text) { $('shareimg').src = dataUrl; $('sharetext
 // ---------- 開発用: ff(秒) で早送り ----------
 window.ff = sec => { const n = Math.round(sec * FPS); for (let i = 0; i < n && mode === 'play'; i++) { if (S.phase === 'done' && resultShown) break; hitstop = 0; tick(); } return S.phase + ' dmg=' + S.dmg + ' dist=' + S.dist; };
 window.sim = () => S;
+window.settle = () => { flash = 0; texts = []; parts = []; for (let i = 0; i < 90; i++) render(); return 'cam ' + cam.x.toFixed(0) + ' z ' + cam.z.toFixed(2); };   // テスト用: カメラを落ち着かせて描く
 
 // ---------- 自動更新: Safari が古いページを開き続けるので、新しい版があれば読み直す ----------
 async function checkVersion() {

@@ -3,7 +3,7 @@
 'use strict';
 (function (root) {
 
-const SIM_VERSION = 1;          // 物理・技の数値を変えたら上げる（古い記録は捨てる）
+const SIM_VERSION = 2;          // 物理・技の数値を変えたら上げる（古い記録は捨てる）
 const FPS = 60;
 const COUNT_F = 90;             // 3・2・1
 const FIGHT_F = 600;            // 10 秒
@@ -31,6 +31,7 @@ const BAT_PERFECT = 8, BAT_WINDOW = 60;     // ずれ（ワールド単位）が
 // 飛行（メートル・フレーム）
 const FG = 0.02, FDRAG = 0.9992, BOUNCE = 0.35, ROLL = 0.965;
 const DEG = Math.PI / 180;
+const UNITS = 10;             // 飛行の 1 m = ステージの 10 単位（画面を切り替えずに続けて見せるため）
 function dsin(x) {   // 決定的な sin（テイラー展開）。|x| <= π/2 で使う
   const x2 = x * x;
   return x * (1 + x2 * (-1 / 6 + x2 * (1 / 120 + x2 * (-1 / 5040 + x2 * (1 / 362880 + x2 * (-1 / 39916800 + x2 / 6227020800))))));
@@ -42,7 +43,7 @@ function makeSim() {
     f: 0, phase: 'count', pf: 0,
     p: { x: -40, y: 0, vy: 0, face: 1, act: null, buf: null },
     d: { x: 30, y: 0, vx: 0, vy: 0, stun: 0, spin: 0, air: false },
-    dmg: 0, combo: 0, maxCombo: 0, hits: 0, stale: [],
+    dmg: 0, combo: 0, maxCombo: 0, hits: 0, stale: [], tossed: false,
     bat: null, fly: null, dist: 0,
     inputs: [], fx: [],
   };
@@ -156,7 +157,7 @@ function swing(s) {
   const v = (0.35 + 0.016 * s.dmg) * (0.25 + 0.75 * q);
   b.result = ae <= BAT_PERFECT ? 'just' : q > 0.6 ? 'good' : 'weak';
   b.q = q; b.angle = ang / DEG; b.v = v;
-  s.fly = { x: 0, y: 1.5, vx: v * dcos(ang), vy: v * dsin(ang), spin: 0, landed: false, maxY: 1.5, t: 0 };
+  s.fly = { x: 0, y: BAT_Y / UNITS, vx: v * dcos(ang), vy: v * dsin(ang), spin: 0, landed: false, maxY: 1.5, t: 0 };
   s.fx.push({ t: 'bat', result: b.result });
 }
 
@@ -165,12 +166,35 @@ function step(s) {
   if (s.phase === 'count') { if (s.pf >= COUNT_F) { s.phase = 'fight'; s.pf = 0; } return; }
   if (s.phase === 'fight') { stepFight(s, true); if (s.pf >= FIGHT_F) { s.phase = 'timeup'; s.pf = 0; s.p.buf = null; } return; }
   if (s.phase === 'timeup') {
-    stepFight(s, false);   // 出ている技とダミーの動きはそのまま見せる
-    if (s.pf >= TIMEUP_F) {
-      s.phase = 'bat'; s.pf = 0;
-      s.p.x = -22; s.p.y = 0; s.p.vy = 0; s.p.face = 1; s.p.act = null;
-      s.d.x = 0; s.d.y = BAT_DROP_Y; s.d.vx = 0; s.d.vy = 0; s.d.spin = 0;
-      s.bat = { swung: false, at: -1, result: null };
+    // 出ている技とダミーの動きはそのまま。ダミーが着地して落ち着いたら、その場でラストのトスへ
+    stepFight(s, false);
+    const d = s.d;
+    if ((s.pf >= TIMEUP_F && d.y <= 0 && Math.abs(d.vx) < 0.6 && !s.p.act && s.p.y <= 0) || s.pf >= 180) {
+      s.phase = 'toss'; s.pf = 0; s.p.act = null; s.p.vy = 0;
+    }
+    return;
+  }
+  if (s.phase === 'toss') {
+    // 主人公がダミーの左へ歩いて、真上に打ち上げる → 最高点からバットの場面（ワープしない）
+    const p = s.p, d = s.d;
+    if (!s.tossed) {
+      d.vx *= 0.8; d.x += d.vx; d.y = Math.max(0, d.y + Math.min(0, d.vy)); d.vy = 0;
+      const tx = d.x - 24;
+      p.x += Math.max(-4, Math.min(4, tx - p.x)); p.face = 1; p.y = Math.max(0, p.y - 4);
+      if (Math.abs(tx - p.x) < 0.5 && s.pf >= 14) {
+        if (!p.act) p.act = { a: 'up', f: 0, hit: true };
+        else if (++p.act.f >= 5) {
+          s.tossed = true; d.vx = 0; d.vy = Math.sqrt(2 * DG * (BAT_DROP_Y - d.y)); d.stun = 60;
+          s.fx.push({ t: 'toss', x: d.x, y: d.y });
+        }
+      }
+    } else {
+      if (p.act && ++p.act.f >= MOVES.up.t) p.act = null;
+      d.vy -= DG; d.y += d.vy; d.spin += 0.25;
+      if (d.vy <= 0) {
+        s.phase = 'bat'; s.pf = 0; p.act = null; d.vy = 0; d.spin = 0;
+        s.bat = { swung: false, at: -1, result: null, x: d.x };
+      }
     }
     return;
   }
@@ -211,6 +235,6 @@ function replay(inputs) {
   return s;
 }
 
-const api = { SIM_VERSION, FPS, COUNT_F, FIGHT_F, TIMEUP_F, HW, CEIL, BAT_Y, BAT_DROP_Y, BAT_PERFECT, BAT_WINDOW, MOVES, makeSim, input, accepts, step, replay };
+const api = { SIM_VERSION, UNITS, FPS, COUNT_F, FIGHT_F, TIMEUP_F, HW, CEIL, BAT_Y, BAT_DROP_Y, BAT_PERFECT, BAT_WINDOW, MOVES, makeSim, input, accepts, step, replay };
 if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Homerun = api;
 })(this);
