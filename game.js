@@ -1,9 +1,9 @@
 // ぶっとばしダミー — 画面・入力・進行（試合の中身は sim.js）
 'use strict';
 const H = window.Homerun;
-const { FPS, FIGHT_F, HW, CEIL, BAT_Y, MOVES, UNITS } = H;
+const { FPS, FIGHT_F, HW, CEIL, BAT_Y, BAT_DROP_Y, MOVES, UNITS } = H;
 const SITE_URL = 'https://renmy-stack.github.io/homerun/';
-const VERSION = '7';   // version.txt と合わせる。更新したら index.html の ?v= も上げる
+const VERSION = '8';   // version.txt と合わせる。更新したら index.html の ?v= も上げる
 
 const $ = id => document.getElementById(id);
 const cv = $('game'), ctx = cv.getContext('2d');
@@ -33,7 +33,7 @@ let rival = null;
 let S = null;                 // sim
 let mode = 'title';           // title | play | result
 let frameDt = 0, acc = 0, lastTs = 0, hitstop = 0, shake = 0, fast = false, doneWait = 0;
-let parts = [], texts = [], flash = 0;
+let parts = [], texts = [], flash = 0, meteor = null;
 let cam = { x: 0, z: 0 };
 let resultShown = false, isRecord = false;
 
@@ -57,7 +57,7 @@ function showTitle() {
 }
 function startGame() {
   S = H.makeSim(); mode = 'play'; resultShown = false; fast = false; doneWait = 0;
-  parts = []; texts = []; hitstop = 0; shake = 0; flash = 0; cam = { x: 0, z: 0 };
+  parts = []; texts = []; hitstop = 0; shake = 0; flash = 0; meteor = null; cam = { x: 0, z: 0 };
   $('title').hidden = true; $('result').hidden = true; $('hud').hidden = false;
   updateHud();
 }
@@ -135,7 +135,7 @@ function onFx(e) {
   } else if (e.t === 'wall') { shake = Math.max(shake, 4); burst(e.x, e.y + 10, 5, '#9fe0ff'); }
   else if (e.t === 'bounce') burst(e.x, 4, 6, '#d9c7a0');
   else if (e.t === 'toss') { burst(e.x, e.y + 20, 12, '#ffffff'); shake = 6; }
-  else if (e.t === 'apex') burst(e.x, e.y + DUMMY_H / 2, 10, '#ffcc33');
+  else if (e.t === 'apex') { burst(e.x, e.y + DUMMY_H / 2, 10, '#ffcc33'); meteor = { t0: performance.now(), x: e.x, y: e.y + DUMMY_H / 2, sparks: [] }; }
   else if (e.t === 'bat') {
     if (e.result === 'miss' || e.result === 'late') { texts.push({ x: 0, y: 150, s: 'からぶり…', life: 80, c: '#9fb3ff', big: true }); }
     else {
@@ -196,6 +196,7 @@ function updateCamera(k, oy) {
     follow = 1;   // 横は遅れずに追う（速いので遅れると画面から消える）
   } else if (S.phase === 'toss' || S.phase === 'bat') {
     tx = S.bat ? S.bat.x : S.d.x - 12; follow = 0.06;
+    tz = Math.min(k, (oy - 190) / (BAT_DROP_Y + DUMMY_H));   // 打ち上げた最高点の上に空（流れ星の通り道）を残す
   }
   if (!cam.z) { cam.z = k; cam.x = tx; }
   cam.x += (tx - cam.x) * follow;
@@ -263,6 +264,7 @@ function drawScene(k, oy) {
     ctx.beginPath(); ctx.moveTo(X(S.bat.x - 90), Y(LY)); ctx.lineTo(X(S.bat.x + 90), Y(LY)); ctx.stroke();
     outlined('線に かさなったら タップ！', W / 2, Y(LY) - 50, 20, '#ffcc33');
   }
+  if (meteor) drawMeteor(X, Y, z);
   // キャラ
   const d = S.d, p = S.p;
   drawHero(X(p.x), Y(p.y), z, p);
@@ -291,7 +293,7 @@ function drawScene(k, oy) {
     outlined('←→ スマッシュ ／ ↓ たたきつけ', W / 2, hy + 28, 18, '#fff');
   } else if (S.phase === 'fight' && S.pf < 30) bigText('GO!', Hh * 0.38, '#ffcc33');
   else if (S.phase === 'timeup') bigText('タイムアップ！', Hh * 0.38, '#ff4d4d');
-  else if (S.phase === 'toss') bigText('ラスト！', Hh * 0.38, '#ffcc33');
+  else if (S.phase === 'toss' && S.hang == null) bigText('ラスト！', Hh * 0.38, '#ffcc33');   // 止まったら流れ星の邪魔をしない
   // 飛行中の距離
   if (flying()) {
     const dist = S.phase === 'done' ? S.dist : Math.max(0, S.fly.x);
@@ -313,6 +315,58 @@ function outlined(s, x, y, size, c) {
   ctx.lineWidth = Math.max(3, sz / 4); ctx.strokeStyle = '#000'; ctx.strokeText(s, x, y);
   ctx.fillStyle = c; ctx.fillText(s, x, y);
 }
+// 流れ星: ダミーが最高点で止まった瞬間、右上から左下へダミーのすぐ後ろをかすめて流れる（見た目だけ。時間で動く）
+const METEOR_MS = 700;
+function drawMeteor(X, Y, z) {
+  const m = meteor, age = (window.__freezeMs != null ? m.t0 + window.__freezeMs : performance.now()) - m.t0, u = age / METEOR_MS;   // __freezeMs はテスト用
+  if (u > 1.6) { meteor = null; return; }
+  // 経路（ワールド座標）: u=0.45 でダミーの後ろ上をかすめる
+  const dx = -560, dy = -230, cx = m.x + 30, cy = m.y + 30;
+  const at = v => ({ x: cx + dx * (v - 0.45), y: cy + dy * (v - 0.45) });
+  const head = at(Math.min(u, 1)), len = 0.32;
+  const tail = at(Math.max(0, Math.min(u, 1) - len));
+  const hx = X(head.x), hy = Y(head.y), tx = X(tail.x), ty = Y(tail.y);
+  const fade = u < 1 ? 1 : Math.max(0, 1 - (u - 1) / 0.6);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  // 尾: 太い光 → 細い芯
+  if (u <= 1.05) {
+    for (const [w, c] of [[16 * z, 'rgba(120,170,255,'], [8 * z, 'rgba(190,220,255,'], [3 * z, 'rgba(255,255,255,']]) {
+      const g = ctx.createLinearGradient(hx, hy, tx, ty);
+      g.addColorStop(0, c + (0.9 * fade) + ')'); g.addColorStop(1, c + '0)');
+      ctx.strokeStyle = g; ctx.lineWidth = Math.max(1.5, w); ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(tx, ty); ctx.stroke();
+    }
+    // 頭: にじむ光と十字のきらめき
+    const r = 26 * z, rg = ctx.createRadialGradient(hx, hy, 0, hx, hy, r);
+    rg.addColorStop(0, 'rgba(255,255,255,1)'); rg.addColorStop(0.3, 'rgba(200,225,255,.8)'); rg.addColorStop(1, 'rgba(120,170,255,0)');
+    ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(hx, hy, r, 0, Math.PI * 2); ctx.fill();
+    sparkle(hx, hy, 22 * z * (0.8 + 0.2 * Math.sin(age / 40)), 1);
+    // ドット風の火の粉を落としていく
+    if (u < 1 && Math.random() < 0.9) m.sparks.push({ x: head.x, y: head.y, vx: (Math.random() - 0.3) * 1.2, vy: (Math.random() - 0.7) * 1.2, born: age, c: Math.random() < 0.5 ? '#ffffff' : Math.random() < 0.5 ? '#ffe27a' : '#9fc8ff' });
+  }
+  for (const s of m.sparks) {
+    const a = (age - s.born) / 500; if (a > 1) continue;
+    const k = (age - s.born) / 16, px = X(s.x + s.vx * k), py = Y(s.y + s.vy * k), sz = Math.max(2, 4 * z) * (1 - a * 0.5);
+    ctx.globalAlpha = (1 - a) * fade; ctx.fillStyle = s.c; ctx.fillRect(Math.round(px - sz / 2), Math.round(py - sz / 2), sz, sz);
+  }
+  ctx.globalAlpha = 1;
+  // かすめた瞬間、ダミーに「キラーン」
+  const g0 = (u - 0.45) / 0.35;
+  if (g0 > 0 && g0 < 1) sparkle(X(m.x + 24), Y(m.y + 28), 44 * z * Math.sin(g0 * Math.PI), Math.sin(g0 * Math.PI));
+  ctx.restore();
+  if (u > 0.4 && u < 0.5 && !m.glint) { m.glint = true; texts.push({ x: m.x + 50, y: m.y + 60, s: 'キラーン！', life: 45, c: '#bfe0ff' }); }
+}
+// 4 本の光の筋（十字のきらめき）
+function sparkle(x, y, r, a) {
+  if (r <= 0.5) return;
+  ctx.save(); ctx.globalAlpha = Math.max(0, Math.min(1, a)); ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.moveTo(x, y - r); ctx.lineTo(x + r * 0.14, y - r * 0.14); ctx.lineTo(x + r, y); ctx.lineTo(x + r * 0.14, y + r * 0.14);
+  ctx.lineTo(x, y + r); ctx.lineTo(x - r * 0.14, y + r * 0.14); ctx.lineTo(x - r, y); ctx.lineTo(x - r * 0.14, y - r * 0.14);
+  ctx.closePath(); ctx.fill(); ctx.restore();
+}
+
 function bigText(s, y, c) {
   ctx.textAlign = 'center'; fitFont(s, 64);
   ctx.lineWidth = 8; ctx.strokeStyle = '#000'; ctx.strokeText(s, W / 2, y);
@@ -433,7 +487,7 @@ function showShareBox(dataUrl, text) { $('shareimg').src = dataUrl; $('sharetext
 // ---------- 開発用: ff(秒) で早送り ----------
 window.ff = sec => { const n = Math.round(sec * FPS); for (let i = 0; i < n && mode === 'play'; i++) { if (S.phase === 'done' && resultShown) break; hitstop = 0; tick(); } return S.phase + ' dmg=' + S.dmg + ' dist=' + S.dist; };
 window.sim = () => S;
-window.settle = () => { flash = 0; texts = []; parts = []; for (let i = 0; i < 90; i++) render(); return 'cam ' + cam.x.toFixed(0) + ' z ' + cam.z.toFixed(2); };   // テスト用: カメラを落ち着かせて描く
+window.settle = ms => { flash = 0; parts = []; if (ms != null && S.hang != null) meteor = { t0: performance.now() - ms, x: S.d.x, y: S.d.y + DUMMY_H / 2, sparks: [] }; for (let i = 0; i < 90; i++) render(); return 'cam ' + cam.x.toFixed(0) + ' z ' + cam.z.toFixed(2); };   // テスト用: カメラを落ち着かせて描く
 
 // ---------- 自動更新: Safari が古いページを開き続けるので、新しい版があれば読み直す ----------
 async function checkVersion() {
