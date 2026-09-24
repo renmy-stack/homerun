@@ -3,7 +3,7 @@
 const H = window.Homerun;
 const { FPS, FIGHT_F, HW, CEIL, BAT_Y, MOVES, UNITS } = H;
 const SITE_URL = 'https://renmy-stack.github.io/homerun/';
-const VERSION = '3';   // version.txt と合わせる。更新したら index.html の ?v= も上げる
+const VERSION = '4';   // version.txt と合わせる。更新したら index.html の ?v= も上げる
 
 const $ = id => document.getElementById(id);
 const cv = $('game'), ctx = cv.getContext('2d');
@@ -260,9 +260,7 @@ function drawScene(k, oy) {
     const LY = BAT_Y + DUMMY_H / 2;   // ダミーの真ん中が線に重なった瞬間 = ジャスト
     ctx.strokeStyle = 'rgba(255,204,51,' + (0.6 + 0.4 * pulse) + ')'; ctx.lineWidth = 4;
     ctx.beginPath(); ctx.moveTo(X(S.bat.x - 90), Y(LY)); ctx.lineTo(X(S.bat.x + 90), Y(LY)); ctx.stroke();
-    ctx.fillStyle = '#ffcc33'; ctx.font = 'bold 20px sans-serif'; ctx.textAlign = 'center';
-    ctx.lineWidth = 5; ctx.strokeStyle = '#000'; ctx.strokeText('線に かさなったら タップ！', W / 2, Y(LY) - 50);
-    ctx.fillText('線に かさなったら タップ！', W / 2, Y(LY) - 50);
+    outlined('線に かさなったら タップ！', W / 2, Y(LY) - 50, 20, '#ffcc33');
   }
   // キャラ
   const d = S.d, p = S.p;
@@ -287,8 +285,9 @@ function drawScene(k, oy) {
   if (S.phase === 'count') {
     const n = 3 - Math.floor(S.pf / 30);
     bigText(n > 0 ? String(n) : 'GO!', Hh * 0.38, '#fff');
-    ctx.font = 'bold 15px sans-serif'; ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
-    ctx.fillText('タップ ジャブ ／ ↑ アッパー ／ ←→ スマッシュ ／ ↓ たたきつけ', W / 2, Math.min(Hh - 30, oy + 60));
+    const hy = Math.min(Hh - 60, oy + 56);
+    outlined('タップ ジャブ ／ ↑ アッパー', W / 2, hy, 18, '#fff');
+    outlined('←→ スマッシュ ／ ↓ たたきつけ', W / 2, hy + 28, 18, '#fff');
   } else if (S.phase === 'fight' && S.pf < 30) bigText('GO!', Hh * 0.38, '#ffcc33');
   else if (S.phase === 'timeup') bigText('タイムアップ！', Hh * 0.38, '#ff4d4d');
   else if (S.phase === 'toss') bigText('ラスト！', Hh * 0.38, '#ffcc33');
@@ -300,8 +299,21 @@ function drawScene(k, oy) {
     if (S.phase === 'fly' && !fast) { ctx.font = 'bold 14px sans-serif'; ctx.lineWidth = 4; ctx.strokeText('タップで はやおくり', W / 2, 138); ctx.fillText('タップで はやおくり', W / 2, 138); }
   }
 }
+// 画面の幅（左右 16px の余白）に収まるまで文字を小さくする
+function fitFont(s, size, maxW) {
+  maxW = maxW || W - 32;
+  ctx.font = 'bold ' + size + 'px sans-serif';
+  const w = ctx.measureText(s).width;
+  if (w > maxW) { size = Math.floor(size * maxW / w); ctx.font = 'bold ' + size + 'px sans-serif'; }
+  return size;
+}
+function outlined(s, x, y, size, c) {
+  ctx.textAlign = 'center'; const sz = fitFont(s, size);
+  ctx.lineWidth = Math.max(3, sz / 4); ctx.strokeStyle = '#000'; ctx.strokeText(s, x, y);
+  ctx.fillStyle = c; ctx.fillText(s, x, y);
+}
 function bigText(s, y, c) {
-  ctx.textAlign = 'center'; ctx.font = 'bold ' + Math.min(64, W * 0.8 / Math.max(3, s.length)) + 'px sans-serif';
+  ctx.textAlign = 'center'; fitFont(s, 64);
   ctx.lineWidth = 8; ctx.strokeStyle = '#000'; ctx.strokeText(s, W / 2, y);
   ctx.fillStyle = c; ctx.fillText(s, W / 2, y);
 }
