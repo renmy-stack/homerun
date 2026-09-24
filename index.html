@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1b1d3a">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=2">
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-title" content="ぶっとばし">
+<meta property="og:title" content="ぶっとばしダミー">
+<meta property="og:description" content="10秒でダミーをなぐって、最後にバットでかっとばせ！飛距離で勝負！">
+<title>ぶっとばしダミー</title>
+<link rel="stylesheet" href="style.css?v=2">
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" hidden>
+  <div id="timer">10.00</div>
+  <div id="dmg"><span id="dmgnum">0.0</span><span class="pct">%</span></div>
+  <div id="combo"></div>
+</div>
+
+<div id="title">
+  <div class="panel">
+    <div class="logo">ぶっとばし<br>ダミー</div>
+    <div class="lead">10秒でなぐって、さいごにバットで かっとばせ！</div>
+    <div id="rival" hidden></div>
+    <div id="tbest"></div>
+    <ul class="howto">
+      <li><b class="k">タップ</b> ジャブ</li>
+      <li><b class="k">↑ スワイプ</b> アッパー（とんで追いかける）</li>
+      <li><b class="k">← → スワイプ</b> スマッシュ</li>
+      <li><b class="k">↓ スワイプ</b> たたきつけ（地面なら うきあげ）</li>
+      <li>うかせたまま当てると <b>コンボ</b>でダメージ アップ！</li>
+      <li>さいごは おちてくるダミーが <b>線に重なった瞬間</b>にタップ</li>
+    </ul>
+    <button id="play" class="main">あそぶ</button>
+  </div>
+</div>
+
+<div id="result" hidden>
+  <div class="panel">
+    <div class="rtitle" id="rtitle">きろく</div>
+    <div class="rdist"><span id="rdist">0.0</span><span class="unit">m</span></div>
+    <div class="rsub" id="rsub"></div>
+    <div class="rbest" id="rbest"></div>
+    <div class="rbtns">
+      <button id="again" class="main">もう一度</button>
+      <button id="share" class="sub">シェア</button>
+    </div>
+  </div>
+</div>
+
+<div id="sharebox" hidden>
+  <div class="panel">
+    <img id="shareimg" alt="結果の画像">
+    <div class="note">画像を長押しで保存できます</div>
+    <textarea id="sharetext" readonly></textarea>
+    <div class="rbtns">
+      <button id="copy" class="main">文をコピー</button>
+      <button id="closeshare" class="sub">とじる</button>
+    </div>
+  </div>
+</div>
+
+<script src="sim.js?v=2"></script>
+<script src="game.js?v=2"></script>
+</body>
+</html>
