@@ -3,7 +3,7 @@
 const H = window.Homerun;
 const { FPS, FIGHT_F, HW, CEIL, BAT_Y, BAT_DROP_Y, MOVES, UNITS } = H;
 const SITE_URL = 'https://renmy-stack.github.io/homerun/';
-const VERSION = '8';   // version.txt と合わせる。更新したら index.html の ?v= も上げる
+const VERSION = '9';   // version.txt と合わせる。更新したら index.html の ?v= も上げる
 
 const $ = id => document.getElementById(id);
 const cv = $('game'), ctx = cv.getContext('2d');
@@ -316,7 +316,7 @@ function outlined(s, x, y, size, c) {
   ctx.fillStyle = c; ctx.fillText(s, x, y);
 }
 // 流れ星: ダミーが最高点で止まった瞬間、右上から左下へダミーのすぐ後ろをかすめて流れる（見た目だけ。時間で動く）
-const METEOR_MS = 700;
+const METEOR_MS = 1200;
 function drawMeteor(X, Y, z) {
   const m = meteor, age = (window.__freezeMs != null ? m.t0 + window.__freezeMs : performance.now()) - m.t0, u = age / METEOR_MS;   // __freezeMs はテスト用
   if (u > 1.6) { meteor = null; return; }
@@ -352,7 +352,7 @@ function drawMeteor(X, Y, z) {
   }
   ctx.globalAlpha = 1;
   // かすめた瞬間、ダミーに「キラーン」
-  const g0 = (u - 0.45) / 0.35;
+  const g0 = (u - 0.45) / 0.2;
   if (g0 > 0 && g0 < 1) sparkle(X(m.x + 24), Y(m.y + 28), 44 * z * Math.sin(g0 * Math.PI), Math.sin(g0 * Math.PI));
   ctx.restore();
   if (u > 0.4 && u < 0.5 && !m.glint) { m.glint = true; texts.push({ x: m.x + 50, y: m.y + 60, s: 'キラーン！', life: 45, c: '#bfe0ff' }); }
