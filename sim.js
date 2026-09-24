@@ -3,7 +3,7 @@
 'use strict';
 (function (root) {
 
-const SIM_VERSION = 4;          // 物理・技の数値を変えたら上げる（古い記録は捨てる）
+const SIM_VERSION = 5;          // 物理・技の数値を変えたら上げる（古い記録は捨てる）
 const FPS = 60;
 const COUNT_F = 90;             // 3・2・1
 const FIGHT_F = 600;            // 10 秒
@@ -32,7 +32,7 @@ const STALE_N = 6, STALE_K = 0.1;    // 直近 6 回に同じ技があると 1 �
 const COMBO_K = 0.2, COMBO_MAX = 5;  // 浮いている間に当てると 1 段ごとに +20%（最大 +100%）
 
 // バット: ダミーがゆっくり落ちてくる。バットの高さを通る瞬間に振る
-const BAT_Y = 60, BAT_DROP_Y = 300;           // トスの最高点から普通の重力（DG）で落ちてくる
+const BAT_Y = 60, BAT_DROP_Y = 300, HANG_F = 26;   // HANG_F: 最高点で止まるフレーム数           // トスの最高点から普通の重力（DG）で落ちてくる
 const BAT_PERFECT = 2, BAT_WINDOW = 12;       // ずれ（フレーム）がこれ以下ならジャスト / これを超えると空振り
 // 飛行（メートル・フレーム）
 const FG = 0.02, FDRAG = 0.9992, BOUNCE = 0.35, ROLL = 0.965;
@@ -49,7 +49,7 @@ function makeSim() {
     f: 0, phase: 'count', pf: 0,
     p: { x: -40, y: 0, vy: 0, face: 1, act: null, buf: null },
     d: { x: 30, y: 0, vx: 0, vy: 0, stun: 0, spin: 0, air: false, grace: 0, peak: 0 },
-    dmg: 0, combo: 0, maxCombo: 0, hits: 0, stale: [], tossed: false,
+    dmg: 0, combo: 0, maxCombo: 0, hits: 0, stale: [], tossed: false, hang: null,
     bat: null, fly: null, dist: 0,
     inputs: [], fx: [],
   };
@@ -198,8 +198,10 @@ function step(s) {
       }
     } else {
       if (p.act && ++p.act.f >= MOVES.up.t) p.act = null;
-      d.vy -= DG; d.y += d.vy; d.spin += 0.25;
-      if (d.vy <= 0) {
+      if (s.hang == null) {
+        d.vy -= DG; d.y += d.vy; d.spin += 0.25;
+        if (d.vy <= 0) { s.hang = 0; d.vy = 0; s.fx.push({ t: 'apex', x: d.x, y: d.y }); }
+      } else if (++s.hang >= HANG_F) {   // 最高点で一瞬止まってから落ちる（その間にバットを構える）
         s.phase = 'bat'; s.pf = 0; p.act = null; d.vy = 0; d.spin = 0;
         s.bat = { swung: false, at: -1, result: null, x: d.x };
       }

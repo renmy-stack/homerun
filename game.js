@@ -3,7 +3,7 @@
 const H = window.Homerun;
 const { FPS, FIGHT_F, HW, CEIL, BAT_Y, MOVES, UNITS } = H;
 const SITE_URL = 'https://renmy-stack.github.io/homerun/';
-const VERSION = '6';   // version.txt と合わせる。更新したら index.html の ?v= も上げる
+const VERSION = '7';   // version.txt と合わせる。更新したら index.html の ?v= も上げる
 
 const $ = id => document.getElementById(id);
 const cv = $('game'), ctx = cv.getContext('2d');
@@ -135,6 +135,7 @@ function onFx(e) {
   } else if (e.t === 'wall') { shake = Math.max(shake, 4); burst(e.x, e.y + 10, 5, '#9fe0ff'); }
   else if (e.t === 'bounce') burst(e.x, 4, 6, '#d9c7a0');
   else if (e.t === 'toss') { burst(e.x, e.y + 20, 12, '#ffffff'); shake = 6; }
+  else if (e.t === 'apex') burst(e.x, e.y + DUMMY_H / 2, 10, '#ffcc33');
   else if (e.t === 'bat') {
     if (e.result === 'miss' || e.result === 'late') { texts.push({ x: 0, y: 150, s: 'からぶり…', life: 80, c: '#9fb3ff', big: true }); }
     else {
@@ -319,7 +320,7 @@ function bigText(s, y, c) {
 }
 
 function heroPose(p) {
-  if (S.phase === 'toss') return p.act ? 'up' : S.tossed ? 'batready' : 'idle';
+  if (S.phase === 'toss') return p.act ? 'up' : S.hang != null ? 'batready' : S.tossed ? 'up' : 'idle';
   if (S.bat) return S.bat.swung ? (S.phase === 'done' && S.bat.result !== 'miss' ? 'win' : 'batswing') : 'batready';
   if (!p.act) return 'idle';
   const m = MOVES[p.act.a];
