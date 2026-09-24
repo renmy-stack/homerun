@@ -3,7 +3,7 @@
 'use strict';
 (function (root) {
 
-const SIM_VERSION = 2;          // 物理・技の数値を変えたら上げる（古い記録は捨てる）
+const SIM_VERSION = 3;          // 物理・技の数値を変えたら上げる（古い記録は捨てる）
 const FPS = 60;
 const COUNT_F = 90;             // 3・2・1
 const FIGHT_F = 600;            // 10 秒
@@ -13,7 +13,13 @@ const CEIL = 340;               // 天井
 const PG = 0.6;                 // 主人公の重力
 const DG = 0.42;                // ダミーの重力
 const WALK = 2.6;               // 主人公の自動移動
-const LUNGE = 7;                // 技の出だしで寄る速さ
+const LUNGE = 10;               // 技の出だしで寄る速さ
+// コンボのつなぎやすさ
+const STUN_G = 0.30;            // ふっとんでいる間の重力（ふわっと長く浮く）
+const AIR_DRAG = 0.975;         // ふっとんでいる間の横の減速（遠くへ流れすぎない）
+const GRACE_F = 18;             // 着地してからこのフレーム以内に当てればコンボは続く（ちゃんと浮いたときだけ）
+const AIR_MIN = 30;             // 浮いたとみなす高さ（ジャブの小さなはねではコンボにならない）
+const UP_REACH = 230;           // アッパーで跳べる高さ
 
 // 技: 出だし s・当たる a・全体 t（フレーム）、当たり判定 [前0, 前1, 下, 上]（主人公の向き基準）、ダメージ・ふっとび（固定 + ダメージ比例）・方向
 const MOVES = {
@@ -42,7 +48,7 @@ function makeSim() {
   return {
     f: 0, phase: 'count', pf: 0,
     p: { x: -40, y: 0, vy: 0, face: 1, act: null, buf: null },
-    d: { x: 30, y: 0, vx: 0, vy: 0, stun: 0, spin: 0, air: false },
+    d: { x: 30, y: 0, vx: 0, vy: 0, stun: 0, spin: 0, air: false, grace: 0, peak: 0 },
     dmg: 0, combo: 0, maxCombo: 0, hits: 0, stale: [], tossed: false,
     bat: null, fly: null, dist: 0,
     inputs: [], fx: [],
@@ -71,7 +77,7 @@ function startMove(s, a, dir) {
   p.act = { a, f: 0, hit: false };
   if (a === 'up' && grounded(p)) {
     // ダミーが上にいればそこまで跳ぶ（届く高さまで）
-    const h = Math.max(0, Math.min(170, d.y - 18));
+    const h = Math.max(0, Math.min(UP_REACH, d.y - 18));
     p.vy = Math.sqrt(2 * PG * h) + (h > 0 ? 1.2 : 0);
   }
 }
@@ -109,8 +115,9 @@ function stepFight(s, canAct) {
 
   // ダミーの物理
   if (d.stun > 0) d.stun--;
-  d.vy -= DG; d.vx *= 0.992;
-  d.x += d.vx; d.y += d.vy;
+  if (d.grace > 0 && --d.grace === 0 && !d.air) s.combo = 0;
+  d.vy -= d.stun > 0 ? STUN_G : DG; d.vx *= d.stun > 0 && d.y > 0 ? AIR_DRAG : 0.992;
+  d.x += d.vx; d.y += d.vy; if (d.y > d.peak) d.peak = d.y;
   d.spin += d.vx * 0.04;
   if (d.x < -HW + 10) { d.x = -HW + 10; d.vx = -d.vx * 0.7; s.fx.push({ t: 'wall', x: d.x, y: d.y }); }
   if (d.x > HW - 10) { d.x = HW - 10; d.vx = -d.vx * 0.7; s.fx.push({ t: 'wall', x: d.x, y: d.y }); }
@@ -120,14 +127,14 @@ function stepFight(s, canAct) {
     if (d.vy < -3) { d.vy = -d.vy * 0.55; s.fx.push({ t: 'bounce', x: d.x, y: 0 }); }
     else { d.vy = 0; d.vx *= 0.82; d.spin *= 0.8; }
     // 地面に着いたらコンボは切れる（たたきつけのバウンドだけはつながる）
-    if (d.air && !d.spiked) { d.air = false; s.combo = 0; }
+    if (d.air && !d.spiked) { d.air = false; d.grace = d.peak >= AIR_MIN ? GRACE_F : 0; if (!d.grace) s.combo = 0; }
     d.spiked = false;
   }
 }
 
 function hit(s, a, m) {
   const d = s.d;
-  const air = d.air;   // 前の当たりで浮いてから、まだ地面に着いていない
+  const air = (d.air && d.peak >= AIR_MIN) || d.grace > 0;   // 浮いてから地面に着いていない（着地直後の猶予も含む）
   const count = s.stale.filter(x => x === a).length;
   const staleMul = 1 - STALE_K * count;
   if (air) { s.combo++; s.maxCombo = Math.max(s.maxCombo, s.combo); } else s.combo = 0;
@@ -141,7 +148,7 @@ function hit(s, a, m) {
   const kb = (base + grow * s.dmg) * (0.85 + 0.15 * staleMul);
   d.vx = dir[0] * kb * s.p.face; d.vy = dir[1] * kb;
   d.stun = Math.round(12 + kb * 2.2);
-  d.air = true; d.spiked = a === 'down' && !grounded(d);
+  d.air = true; d.peak = d.y; d.spiked = a === 'down' && !grounded(d);
   s.fx.push({ t: 'hit', a, x: d.x, y: d.y + 20, add, combo: s.combo, kb });
 }
 
