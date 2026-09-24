@@ -3,7 +3,7 @@
 const H = window.Homerun;
 const { FPS, FIGHT_F, HW, CEIL, BAT_Y, MOVES, UNITS } = H;
 const SITE_URL = 'https://renmy-stack.github.io/homerun/';
-const VERSION = '5';   // version.txt と合わせる。更新したら index.html の ?v= も上げる
+const VERSION = '6';   // version.txt と合わせる。更新したら index.html の ?v= も上げる
 
 const $ = id => document.getElementById(id);
 const cv = $('game'), ctx = cv.getContext('2d');

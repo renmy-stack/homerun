@@ -3,7 +3,7 @@
 'use strict';
 (function (root) {
 
-const SIM_VERSION = 3;          // 物理・技の数値を変えたら上げる（古い記録は捨てる）
+const SIM_VERSION = 4;          // 物理・技の数値を変えたら上げる（古い記録は捨てる）
 const FPS = 60;
 const COUNT_F = 90;             // 3・2・1
 const FIGHT_F = 600;            // 10 秒
@@ -32,8 +32,8 @@ const STALE_N = 6, STALE_K = 0.1;    // 直近 6 回に同じ技があると 1 �
 const COMBO_K = 0.2, COMBO_MAX = 5;  // 浮いている間に当てると 1 段ごとに +20%（最大 +100%）
 
 // バット: ダミーがゆっくり落ちてくる。バットの高さを通る瞬間に振る
-const BAT_Y = 60, BAT_DROP_Y = 300, BAT_G = 0.035;
-const BAT_PERFECT = 8, BAT_WINDOW = 60;     // ずれ（ワールド単位）がこれ以下ならジャスト / これを超えると空振り
+const BAT_Y = 60, BAT_DROP_Y = 300;           // トスの最高点から普通の重力（DG）で落ちてくる
+const BAT_PERFECT = 2, BAT_WINDOW = 12;       // ずれ（フレーム）がこれ以下ならジャスト / これを超えると空振り
 // 飛行（メートル・フレーム）
 const FG = 0.02, FDRAG = 0.9992, BOUNCE = 0.35, ROLL = 0.965;
 const DEG = Math.PI / 180;
@@ -155,12 +155,13 @@ function hit(s, a, m) {
 function swing(s) {
   const b = s.bat, d = s.d;
   b.swung = true; b.at = s.pf;
-  const err = d.y - BAT_Y;                       // + は早い（まだ上）/ - は遅い
+  // ずれを「線に届くまでのフレーム数」で測る（+ は早い / - は遅い）。落ちる速さが変わっても難しさが変わらない
+  const err = (d.y - BAT_Y) / Math.max(1, -d.vy);
   const ae = Math.abs(err);
   b.err = err;
   if (ae > BAT_WINDOW) { b.result = 'miss'; s.fx.push({ t: 'bat', result: 'miss' }); return; }
   const q = ae <= BAT_PERFECT ? 1 : 1 - (ae - BAT_PERFECT) / (BAT_WINDOW - BAT_PERFECT) * 0.8;
-  const ang = Math.max(6, Math.min(78, 38 + err * 0.5)) * DEG;
+  const ang = Math.max(6, Math.min(78, 38 + err * 2)) * DEG;
   const v = (0.35 + 0.016 * s.dmg) * (0.25 + 0.75 * q);
   b.result = ae <= BAT_PERFECT ? 'just' : q > 0.6 ? 'good' : 'weak';
   b.q = q; b.angle = ang / DEG; b.v = v;
@@ -208,7 +209,7 @@ function step(s) {
   if (s.phase === 'bat') {
     const b = s.bat, d = s.d;
     if (!b.swung || b.result === 'miss') {
-      if (d.y > 0) { d.vy -= BAT_G; d.y += d.vy; }
+      if (d.y > 0) { d.vy -= DG; d.y += d.vy; }
       if (d.y <= 0) {
         d.y = 0;
         if (!b.swung) { b.swung = true; b.at = s.pf; b.result = 'miss'; s.fx.push({ t: 'bat', result: 'late' }); }
